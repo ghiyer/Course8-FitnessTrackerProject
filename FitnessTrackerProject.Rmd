@@ -1,0 +1,175 @@
+---
+title: "Fitbit Project"
+author: "Gaayathri Iyer"
+date: "9/20/2019"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Fitness Tracker Project
+
+## Synopsis
+
+The purpose of the project is to find how well the <I> Weight Lifting Exercise </I> is done. The data set includes the data from accelerometers on the belt, forearm, arm, and dumbell of six participants. They were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E). All classes except Class A correspond to mistakes.  
+
+
+## Load the data for analysis
+
+```{r library}
+library(caret)
+library(doParallel)
+```
+
+``` {r loadTrainData}
+url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+download.file(url, destfile = "FitBitTraining.csv")
+df <- read.csv("FitBitTraining.csv")
+cat("Raw Data Dimension - ", dim(df), "\n\n")
+
+```
+``` {r naCols, echo=FALSE}
+cat("First few column names with NAs \n")
+colNa <- colnames(df)[colSums(is.na(df))>0]
+colNa[1:6]
+```
+``` {r naColsNo}
+length(colNa)
+```
+
+```{r echo=FALSE}
+cat("There are ", length(colNa), " columns with NAs. " )
+if (length(colNa)>0) 
+      cat(" Let us see the total NAs in few columns to decide if these columns are important. \n\n")
+```
+
+```{r echo=FALSE}
+colSums(is.na(df[, which(names(df)%in% colNa)]))[1:6]
+
+```
+
+We can see that the NAs in the columns are 98%. This shows that we can ignore these columns for our model prdiction.
+
+## Clean the data
+##### Remove all Near Zero Value(NZV) columns from the data set as they are not good predictors.
+
+``` {r cleanData}
+df[is.na(df)] <- 0
+df <- df[,-nearZeroVar(df)]
+df <- df[,-c(1:6)]
+cat("Cleaned Data Dimension - ", dim(df))
+```
+
+## Prepare training set for model training
+
+###### Let us partition the training set for model training ie., split training set into training and testing sets to train the model
+
+``` {r splitData}
+
+inTrain <- createDataPartition(df$classe, p=0.7, list=FALSE)
+training <- df[inTrain,]
+testing <- df[-inTrain,]
+cat("Model Training : Data Dimension - ", dim(training), "\n")
+cat("Model Testing  : Data Dimension - ", dim(testing))
+
+```
+
+###### Now that the training data is split into 2 sets for model training and testing, we need to choose the best model to train our data set. Let us try the classification models Parallel Random Forest and Gradient Boosting with cross-validation to pick the best one for our scenario. 
+
+### Parallel Random Forest Model
+
+``` {r fitRF}
+clusters <- makeCluster(4)      
+registerDoParallel(clusters)
+fitRF <- train(classe ~ ., data=training, method="parRF", trControl=trainControl("cv", number=4), metric="Accuracy", maximize=TRUE, tuneLength=3)
+```
+
+###### Summary of Random Forest method used
+``` {r RFModel}
+fitRF$finalModel
+fitRF
+```
+
+``` {r RFPlot, echo=FALSE}
+# summary(fitRF)
+# plot(fitRF, main="Accuracy of Random Forest")
+```
+
+###### Test the model 
+``` {r RFvalidate}
+predictFit <- predict(fitRF, newdata=testing)
+cmRF <- confusionMatrix(predictFit, testing$classe)
+cmRF
+```
+###### From the above result we see that 
+```{r rfOOB, echo=FALSE}
+cat("Accuracy of the model is ",cmRF$overall["Accuracy"]*100, "%\n" )
+cat("Out of sample error is ", (1-cmRF$overall["Accuracy"])*100, "%")
+```
+
+### Gradient Boosting Model
+```{r fitGBM}
+fitGBM <- train(classe ~ ., data=training, method="gbm", trControl=trainControl("cv", number=4), verbose=FALSE)
+```
+
+###### Summary of Gradient Boosting method used
+``` {r GBModel}
+fitGBM$finalModel
+(fitGBM)
+```
+
+``` {r plotGBM, echo=FALSE}
+plot(fitGBM, main="Accuracy of Gradient Boosting Model")
+```
+
+###### Test the model 
+``` {r GBMvalidate}
+predictFit <- predict(fitGBM, newdata=testing)
+cmGBM <- confusionMatrix(predictFit, testing$classe)
+cmGBM
+```
+```{r gbmOOB, echo=FALSE}
+cat("Accuracy of GBM is ",cmGBM$overall["Accuracy"]*100, "%\n" )
+```
+
+## Conclusion
+
+```{r takeAway, echo=FALSE}
+cat("From the above two models' accuracies we can see that the Random Forest model has a better prediction (", cmRF$overall["Accuracy"]*100, "%) than the Gradient Boosting model. So we will use the Random Forest model to predict the Test Data set.")
+```
+
+##### Variable Importance - The top predictors of the model
+
+```{r varImportance}
+varImp(fitRF)
+```
+
+##### Apply the trained model to the Test Data
+
+``` {r loadTestData}
+url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+download.file(url, destfile = "FitBitTest.csv")
+dfTest <- read.csv("FitBitTest.csv")
+cat("Raw Test Data Dimension - ", dim(dfTest))
+```
+
+``` {r cleanTestData}
+dfTest[is.na(dfTest)] <- 0
+dfTest <- dfTest[,-nearZeroVar(dfTest)]
+dfTest <- dfTest[,-c(1:6)]
+cat("Cleaned Test Data Dimension - ", dim(dfTest))
+```
+
+##### Now predict the Test Data variable ('classe') using our trained model
+
+``` {r predictTest}
+prdTest <- predict(fitRF, newdata = dfTest)
+prdTest
+stopCluster(clusters)
+
+```
+
